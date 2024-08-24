@@ -212,12 +212,10 @@ pub fn audio_resample(
     .unwrap_or_default()
 }
 
-pub fn stereo_to_mono(stereo_data: &[f32]) -> Vec<f32> {
-    assert_eq!(
-        stereo_data.len() % 2,
-        0,
-        "Stereo data length should be even."
-    );
+pub fn stereo_to_mono(stereo_data: &[f32]) -> Result<Vec<f32>> {
+    if stereo_data.len() & 2 != 0 {
+        bail!("Stereo data length should be even.")
+    }
 
     let mut mono_data = Vec::with_capacity(stereo_data.len() / 2);
 
@@ -226,5 +224,5 @@ pub fn stereo_to_mono(stereo_data: &[f32]) -> Vec<f32> {
         mono_data.push(average);
     }
 
-    mono_data
+    Ok(mono_data)
 }
