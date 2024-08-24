@@ -1,3 +1,4 @@
 /target
 *.onnx
 *.wav
+*.bin

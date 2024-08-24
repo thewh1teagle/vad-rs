@@ -1,0 +1,10 @@
+[package]
+name = "whisper"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+whisper-rs = { git = "https://github.com/thewh1teagle/whisper-rs.git", branch = "v1.6.3-beta.0", features = [
+    "whisper-cpp-tracing",
+] }
+vad_rs = { path = "../../" }
