@@ -10,10 +10,11 @@ use eyre::{bail, Result};
 use once_cell::sync::Lazy;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use vad_rs::{Vad, VadStatus};
 
-static MIN_SPEECH_DUR: Lazy<usize> = Lazy::new(|| 1000); // 1 second
-static MIN_SILENCE_DUR: Lazy<usize> = Lazy::new(|| 1000); // 1 second
+static MIN_SPEECH_DUR: Lazy<usize> = Lazy::new(|| 600); // 0.6s
+static MIN_SILENCE_DUR: Lazy<usize> = Lazy::new(|| 1500); // 1s
 
 fn main() -> Result<()> {
     let model_path = std::env::args()
@@ -146,34 +147,45 @@ fn on_stream_data<T, U>(
         .collect();
 
     // Resample the stereo audio to the desired sample rate
-    let resampled_stereo: Vec<f32> = audio_resample(&samples, sample_rate, 16000, channels);
+    let resampled: Vec<f32> = audio_resample(&samples, sample_rate, 16000, channels);
 
-    // Convert the resampled stereo audio to mono
-    let mono_samples = stereo_to_mono(&resampled_stereo);
-
-    // Write the mono data to the WAV file
     let chunk_size = (30 * sample_rate / 1000) as usize;
     let mut vad = vad_handle.lock().unwrap();
-    if let Some(first_chunk) = mono_samples.chunks(chunk_size).next() {
+    if let Some(first_chunk) = resampled.chunks(chunk_size).next() {
+        // Start timing
+        let start_time = Instant::now();
+
         if let Ok(mut result) = vad.compute(first_chunk) {
+            // Calculate the elapsed time
+            let elapsed_time = start_time.elapsed();
+            let elapsed_ms = elapsed_time.as_secs_f64() * 1000.0;
+
+            // Log or handle the situation if computation time exceeds a threshold
+            if elapsed_ms > 10.0 {
+                eprintln!(
+                    "Warning: VAD computation took too long: {} ms (expected < 30 ms)",
+                    elapsed_ms
+                );
+            }
+
             match result.status() {
                 VadStatus::Speech => {
-                    silence_dur.store(0, Ordering::Relaxed);
                     speech_dur.fetch_add(chunk_size, Ordering::Relaxed);
                     if speech_dur.load(Ordering::Relaxed) >= *MIN_SPEECH_DUR
                         && !is_speech.load(Ordering::Relaxed)
                     {
                         println!("Speech Start");
+                        silence_dur.store(0, Ordering::Relaxed);
                         is_speech.store(true, Ordering::Relaxed);
                     }
                 }
                 VadStatus::Silence => {
-                    speech_dur.store(0, Ordering::Relaxed);
                     silence_dur.fetch_add(chunk_size, Ordering::Relaxed);
                     if silence_dur.load(Ordering::Relaxed) >= *MIN_SILENCE_DUR
                         && is_speech.load(Ordering::Relaxed)
                     {
                         println!("Speech End");
+                        speech_dur.store(0, Ordering::Relaxed);
                         is_speech.store(false, Ordering::Relaxed);
                     }
                 }
