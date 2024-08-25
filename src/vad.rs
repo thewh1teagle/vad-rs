@@ -34,10 +34,10 @@ impl Vad {
     pub fn compute(&mut self, samples: &[f32]) -> Result<VadResult> {
         let samples_tensor = Array2::from_shape_vec((1, samples.len()), samples.to_vec())?;
         let result = self.session.run(ort::inputs![
-            samples_tensor.view(),
-            self.sample_rate_tensor.view(),
-            self.h_tensor.view(),
-            self.c_tensor.view()
+            "input" => samples_tensor.view(),
+            "sr" => self.sample_rate_tensor.view(),
+            "h" => self.h_tensor.view(),
+            "c" => self.c_tensor.view()
         ]?)?;
 
         // Update internal state tensors.
@@ -69,7 +69,7 @@ impl Vad {
     }
 
     pub fn reset(&mut self) {
-        self.h_tensor = Array3::<f32>::zeros((2, 1, 64));
-        self.c_tensor = Array3::<f32>::zeros((2, 1, 64));
+        self.h_tensor.fill(0.0);
+        self.c_tensor.fill(0.0);
     }
 }

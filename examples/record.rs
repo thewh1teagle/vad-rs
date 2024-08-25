@@ -13,8 +13,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use vad_rs::{Vad, VadStatus};
 
-static MIN_SPEECH_DUR: Lazy<usize> = Lazy::new(|| 600); // 0.6s
-static MIN_SILENCE_DUR: Lazy<usize> = Lazy::new(|| 1500); // 1s
+static MIN_SPEECH_DUR: Lazy<usize> = Lazy::new(|| 1000); // 0.6s
+static MIN_SILENCE_DUR: Lazy<usize> = Lazy::new(|| 1000); // 1s
+static VAD_BUF: Lazy<Mutex<Vec<f32>>> = Lazy::new(|| Mutex::new(Vec::new()));
 
 fn main() -> Result<()> {
     let model_path = std::env::args()
@@ -46,6 +47,7 @@ fn main() -> Result<()> {
 
     let sample_rate = config.sample_rate().0;
     let channels = config.channels();
+    let chunk_duration_ms = 100; // Process 100ms chunks
     let is_speech = Arc::new(AtomicBool::new(false));
     let speech_dur = Arc::new(AtomicUsize::new(0));
     let silence_dur = Arc::new(AtomicUsize::new(0));
@@ -128,73 +130,6 @@ fn main() -> Result<()> {
     }
 }
 
-fn on_stream_data<T, U>(
-    input: &[T],
-    sample_rate: u32,
-    channels: u16,
-    vad_handle: Arc<Mutex<Vad>>,
-    is_speech: Arc<AtomicBool>,
-    speech_dur: Arc<AtomicUsize>,
-    silence_dur: Arc<AtomicUsize>,
-) where
-    T: Sample,
-    U: Sample + hound::Sample + FromSample<T>,
-{
-    // Convert the input samples to f32
-    let samples: Vec<f32> = input
-        .iter()
-        .map(|s| s.to_float_sample().to_sample())
-        .collect();
-
-    // Resample the stereo audio to the desired sample rate
-    let resampled: Vec<f32> = audio_resample(&samples, sample_rate, 16000, channels);
-
-    let chunk_size = (30 * sample_rate / 1000) as usize;
-    let mut vad = vad_handle.lock().unwrap();
-    if let Some(first_chunk) = resampled.chunks(chunk_size).next() {
-        // Start timing
-        let start_time = Instant::now();
-
-        if let Ok(mut result) = vad.compute(first_chunk) {
-            // Calculate the elapsed time
-            let elapsed_time = start_time.elapsed();
-            let elapsed_ms = elapsed_time.as_secs_f64() * 1000.0;
-
-            // Log or handle the situation if computation time exceeds a threshold
-            if elapsed_ms > 10.0 {
-                eprintln!(
-                    "Warning: VAD computation took too long: {} ms (expected < 30 ms)",
-                    elapsed_ms
-                );
-            }
-
-            match result.status() {
-                VadStatus::Speech => {
-                    speech_dur.fetch_add(chunk_size, Ordering::Relaxed);
-                    if speech_dur.load(Ordering::Relaxed) >= *MIN_SPEECH_DUR
-                        && !is_speech.load(Ordering::Relaxed)
-                    {
-                        println!("Speech Start");
-                        silence_dur.store(0, Ordering::Relaxed);
-                        is_speech.store(true, Ordering::Relaxed);
-                    }
-                }
-                VadStatus::Silence => {
-                    silence_dur.fetch_add(chunk_size, Ordering::Relaxed);
-                    if silence_dur.load(Ordering::Relaxed) >= *MIN_SILENCE_DUR
-                        && is_speech.load(Ordering::Relaxed)
-                    {
-                        println!("Speech End");
-                        speech_dur.store(0, Ordering::Relaxed);
-                        is_speech.store(false, Ordering::Relaxed);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-}
-
 pub fn audio_resample(
     data: &[f32],
     sample_rate0: u32,
@@ -225,4 +160,78 @@ pub fn stereo_to_mono(stereo_data: &[f32]) -> Result<Vec<f32>> {
     }
 
     Ok(mono_data)
+}
+
+fn on_stream_data<T, U>(
+    input: &[T],
+    sample_rate: u32,
+    channels: u16,
+    vad_handle: Arc<Mutex<Vad>>,
+    is_speech: Arc<AtomicBool>,
+    speech_dur: Arc<AtomicUsize>,
+    silence_dur: Arc<AtomicUsize>,
+) where
+    T: Sample,
+    U: Sample + hound::Sample + FromSample<T>,
+{
+    // Convert the input samples to f32
+    let samples: Vec<f32> = input
+        .iter()
+        .map(|s| s.to_float_sample().to_sample())
+        .collect();
+
+    // Resample the stereo audio to the desired sample rate
+    let resampled: Vec<f32> = audio_resample(&samples, sample_rate, 16000, channels);
+
+    let chunk_size = (30 * sample_rate / 1000) as usize;
+    let mut vad = vad_handle.lock().unwrap();
+
+    let mut vad_buf = VAD_BUF.lock().unwrap();
+    vad_buf.extend(resampled);
+
+    if vad_buf.len() as f32 > sample_rate as f32 * 0.1 {
+        // 0.1s
+        // Start timing
+        let start_time = Instant::now();
+
+        // println!("compute {:?}", vad_buf.len());
+        if let Ok(mut result) = vad.compute(&vad_buf) {
+            // Calculate the elapsed time
+            let elapsed_time = start_time.elapsed();
+            let elapsed_ms = elapsed_time.as_secs_f64() * 1000.0;
+
+            // Log or handle the situation if computation time exceeds a threshold
+            if elapsed_ms > 100.0 {
+                eprintln!(
+                    "Warning: VAD computation took too long: {} ms (expected < 30 ms)",
+                    elapsed_ms
+                );
+            }
+
+            match result.status() {
+                VadStatus::Speech => {
+                    speech_dur.fetch_add(chunk_size, Ordering::Relaxed);
+                    if speech_dur.load(Ordering::Relaxed) >= *MIN_SPEECH_DUR
+                        && !is_speech.load(Ordering::Relaxed)
+                    {
+                        println!("Speech Start");
+                        silence_dur.store(0, Ordering::Relaxed);
+                        is_speech.store(true, Ordering::Relaxed);
+                    }
+                }
+                VadStatus::Silence => {
+                    silence_dur.fetch_add(chunk_size, Ordering::Relaxed);
+                    if silence_dur.load(Ordering::Relaxed) >= *MIN_SILENCE_DUR
+                        && is_speech.load(Ordering::Relaxed)
+                    {
+                        println!("Speech End");
+                        speech_dur.store(0, Ordering::Relaxed);
+                        is_speech.store(false, Ordering::Relaxed);
+                    }
+                }
+                _ => {}
+            }
+        }
+        vad_buf.clear();
+    }
 }
