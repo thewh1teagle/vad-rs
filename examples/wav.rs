@@ -19,7 +19,7 @@ fn main() {
     let spec = reader.spec();
     let mut vad = Vad::new(model_path, spec.sample_rate.try_into().unwrap()).unwrap();
 
-    let chunk_size = (30 * spec.sample_rate / 1000) as usize;
+    let chunk_size = (0.1 * spec.sample_rate as f32) as usize; // 0.1s
     let mut samples: Vec<f32> = reader
         .samples::<i16>()
         .map(|s| s.unwrap() as f32 / i16::MAX as f32)
