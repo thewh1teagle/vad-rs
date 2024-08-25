@@ -1,11 +1,12 @@
 /*
 wget https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx
-wget https://github.com/thewh1teagle/sherpa-rs/releases/download/v0.1.0/motivation.wav
-cargo run --example record silero_vad.onnx
+cargo run silero_vad.onnx
+
+Todo: Apply loudness normalization to ensure consistent and sufficiently loud audio, possibly using ebur128.
 */
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{FromSample, Sample};
+use cpal::Sample;
 use eyre::{bail, Result};
 use once_cell::sync::Lazy;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -13,15 +14,15 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use vad_rs::{Vad, VadStatus};
 
-static MIN_SPEECH_DUR: Lazy<usize> = Lazy::new(|| 1000); // 0.6s
-static MIN_SILENCE_DUR: Lazy<usize> = Lazy::new(|| 1000); // 1s
+static MIN_SPEECH_DUR: Lazy<usize> = Lazy::new(|| 50); // 0.6s
+static MIN_SILENCE_DUR: Lazy<usize> = Lazy::new(|| 500); // 1s
 static VAD_BUF: Lazy<Mutex<Vec<f32>>> = Lazy::new(|| Mutex::new(Vec::new()));
 
 fn main() -> Result<()> {
-    let model_path = std::env::args()
+    let vad_model_path = std::env::args()
         .nth(1)
-        .expect("Please specify model filename");
-    let vad = Vad::new(model_path, 16000).unwrap();
+        .expect("Please specify vad model filename");
+    let vad = Vad::new(vad_model_path, 16000).unwrap();
     let vad_handle = Arc::new(Mutex::new(vad));
 
     let host = cpal::default_host();
@@ -47,7 +48,6 @@ fn main() -> Result<()> {
 
     let sample_rate = config.sample_rate().0;
     let channels = config.channels();
-    let chunk_duration_ms = 100; // Process 100ms chunks
     let is_speech = Arc::new(AtomicBool::new(false));
     let speech_dur = Arc::new(AtomicUsize::new(0));
     let silence_dur = Arc::new(AtomicUsize::new(0));
@@ -148,7 +148,7 @@ pub fn audio_resample(
 }
 
 pub fn stereo_to_mono(stereo_data: &[f32]) -> Result<Vec<f32>> {
-    if stereo_data.len() & 2 != 0 {
+    if stereo_data.len() % 2 != 0 {
         bail!("Stereo data length should be even.")
     }
 
@@ -172,7 +172,7 @@ fn on_stream_data<T, U>(
     silence_dur: Arc<AtomicUsize>,
 ) where
     T: Sample,
-    U: Sample + hound::Sample + FromSample<T>,
+    U: Sample,
 {
     // Convert the input samples to f32
     let samples: Vec<f32> = input
@@ -181,13 +181,17 @@ fn on_stream_data<T, U>(
         .collect();
 
     // Resample the stereo audio to the desired sample rate
-    let resampled: Vec<f32> = audio_resample(&samples, sample_rate, 16000, channels);
+    let mut resampled: Vec<f32> = audio_resample(&samples, sample_rate, 16000, channels);
+
+    if channels > 1 {
+        resampled = stereo_to_mono(&resampled).unwrap();
+    }
 
     let chunk_size = (30 * sample_rate / 1000) as usize;
     let mut vad = vad_handle.lock().unwrap();
 
     let mut vad_buf = VAD_BUF.lock().unwrap();
-    vad_buf.extend(resampled);
+    vad_buf.extend(resampled.clone());
 
     if vad_buf.len() as f32 > sample_rate as f32 * 0.1 {
         // 0.1s
@@ -217,6 +221,7 @@ fn on_stream_data<T, U>(
                         println!("Speech Start");
                         silence_dur.store(0, Ordering::Relaxed);
                         is_speech.store(true, Ordering::Relaxed);
+                        vad_buf.extend(resampled.clone());
                     }
                 }
                 VadStatus::Silence => {
