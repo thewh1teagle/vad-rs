@@ -4,6 +4,8 @@ wget https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin
 cargo run silero_vad.onnx ggml-tiny.bin
 
 Note: In Windows install Vulkan SDK from https://vulkan.lunarg.com and set VULKAN_SDK = "C:\VulkanSDK\<version>"
+
+Todo: Apply loudness normalization to ensure consistent and sufficiently loud audio, possibly using ebur128.
 */
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
