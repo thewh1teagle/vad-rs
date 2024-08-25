@@ -396,12 +396,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hound"
-version = "3.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62adaabb884c94955b19907d60019f4e145d091c75345379e70d1ee696f7854f"
-
-[[package]]
 name = "idna"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -725,7 +719,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "45e45a172e6c0fb7d640e92c7740f4ea476bfc49ef5c52ea9c73e9fae32b09fe"
 dependencies = [
  "half",
- "libloading",
  "ndarray",
  "ort-sys",
  "thiserror",
@@ -1152,13 +1145,10 @@ dependencies = [
 name = "vad-rs"
 version = "0.1.0"
 dependencies = [
- "cpal",
  "eyre",
- "hound",
  "ndarray",
  "once_cell",
  "ort",
- "samplerate",
 ]
 
 [[package]]
@@ -1296,6 +1286,7 @@ dependencies = [
 [[package]]
 name = "whisper-rs"
 version = "0.13.0"
+source = "git+https://github.com/thewh1teagle/whisper-rs.git?branch=v1.6.3-beta.0#bb6e3fa76f26e5ba14bdf8539ee8e1b9bae4db52"
 dependencies = [
  "tracing",
  "whisper-rs-sys",
@@ -1304,6 +1295,7 @@ dependencies = [
 [[package]]
 name = "whisper-rs-sys"
 version = "0.11.0"
+source = "git+https://github.com/thewh1teagle/whisper-rs.git?branch=v1.6.3-beta.0#bb6e3fa76f26e5ba14bdf8539ee8e1b9bae4db52"
 dependencies = [
  "bindgen",
  "cfg-if",
