@@ -1,7 +1,7 @@
 /*
 wget https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx
-wget https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin
-cargo run silero_vad.onnx ggml-tiny.bin
+wget https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
+cargo run silero_vad.onnx ggml-small.bin
 
 Note: In Windows install Vulkan SDK from https://vulkan.lunarg.com and set VULKAN_SDK = "C:\VulkanSDK\<version>"
 
