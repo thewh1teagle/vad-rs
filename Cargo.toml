@@ -14,12 +14,13 @@ eyre = "0.6.12"
 ndarray = "0.16.1"
 once_cell = "1.19.0"
 ort = "=2.0.0-rc.5"
+samplerate = "0.2.4"
 
 
 [dev-dependencies]
 hound = { version = "3.5.1" }
 cpal = "0.15.3"
-samplerate = "0.2.4"
+
 
 [features]
 default = []

@@ -1,6 +1,6 @@
 /*
 wget https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx
-cargo run silero_vad.onnx
+cargo run --example record silero_vad.onnx
 
 Todo: Apply loudness normalization to ensure consistent and sufficiently loud audio, possibly using ebur128.
 */
@@ -14,14 +14,46 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use vad_rs::{Vad, VadStatus};
 
+// Options
 static MIN_SPEECH_DUR: Lazy<usize> = Lazy::new(|| 50); // 0.6s
 static MIN_SILENCE_DUR: Lazy<usize> = Lazy::new(|| 500); // 1s
+
+// Vad
 static VAD_BUF: Lazy<Mutex<Vec<f32>>> = Lazy::new(|| Mutex::new(Vec::new()));
+
+// State
+static IS_SPEECH: Lazy<Arc<AtomicBool>> = Lazy::new(|| Arc::new(AtomicBool::new(false)));
+static SPEECH_DUR: Lazy<Arc<AtomicUsize>> = Lazy::new(|| Arc::new(AtomicUsize::new(0)));
+static SILENCE_DUR: Lazy<Arc<AtomicUsize>> = Lazy::new(|| Arc::new(AtomicUsize::new(0)));
+
+fn build_stream<T>(
+    device: &cpal::Device,
+    config: &cpal::StreamConfig,
+    sample_rate: u32,
+    channels: u16,
+    vad_handle: Arc<Mutex<Vad>>,
+) -> Result<cpal::Stream>
+where
+    T: Sample + cpal::SizedSample,
+{
+    let err_fn = move |err| {
+        eprintln!("an error occurred on stream: {}", err);
+    };
+    Ok(device.build_input_stream(
+        config,
+        move |data: &[T], _: &_| {
+            on_stream_data::<T, T>(data, sample_rate, channels, vad_handle.clone());
+        },
+        err_fn,
+        None,
+    )?)
+}
 
 fn main() -> Result<()> {
     let vad_model_path = std::env::args()
         .nth(1)
         .expect("Please specify vad model filename");
+
     let vad = Vad::new(vad_model_path, 16000).unwrap();
     let vad_handle = Arc::new(Mutex::new(vad));
 
@@ -42,80 +74,37 @@ fn main() -> Result<()> {
     // A flag to indicate that recording is in progress.
     println!("Begin recording...");
 
-    let err_fn = move |err| {
-        eprintln!("an error occurred on stream: {}", err);
-    };
-
     let sample_rate = config.sample_rate().0;
     let channels = config.channels();
-    let is_speech = Arc::new(AtomicBool::new(false));
-    let speech_dur = Arc::new(AtomicUsize::new(0));
-    let silence_dur = Arc::new(AtomicUsize::new(0));
 
     let stream = match config.sample_format() {
-        cpal::SampleFormat::I8 => device.build_input_stream(
+        cpal::SampleFormat::I8 => build_stream::<i8>(
+            &device,
             &config.into(),
-            move |data, _: &_| {
-                on_stream_data::<i8, i8>(
-                    data,
-                    sample_rate,
-                    channels,
-                    vad_handle.clone(),
-                    is_speech.clone(),
-                    speech_dur.clone(),
-                    silence_dur.clone(),
-                )
-            },
-            err_fn,
-            None,
+            sample_rate,
+            channels,
+            vad_handle.clone(),
         )?,
-        cpal::SampleFormat::I16 => device.build_input_stream(
+        cpal::SampleFormat::I16 => build_stream::<i16>(
+            &device,
             &config.into(),
-            move |data, _: &_| {
-                on_stream_data::<i16, i16>(
-                    data,
-                    sample_rate,
-                    channels,
-                    vad_handle.clone(),
-                    is_speech.clone(),
-                    speech_dur.clone(),
-                    silence_dur.clone(),
-                )
-            },
-            err_fn,
-            None,
+            sample_rate,
+            channels,
+            vad_handle.clone(),
         )?,
-        cpal::SampleFormat::I32 => device.build_input_stream(
+        cpal::SampleFormat::I32 => build_stream::<i32>(
+            &device,
             &config.into(),
-            move |data, _: &_| {
-                on_stream_data::<i32, i32>(
-                    data,
-                    sample_rate,
-                    channels,
-                    vad_handle.clone(),
-                    is_speech.clone(),
-                    speech_dur.clone(),
-                    silence_dur.clone(),
-                )
-            },
-            err_fn,
-            None,
+            sample_rate,
+            channels,
+            vad_handle.clone(),
         )?,
-        cpal::SampleFormat::F32 => device.build_input_stream(
+        cpal::SampleFormat::F32 => build_stream::<f32>(
+            &device,
             &config.into(),
-            move |data, _: &_| {
-                on_stream_data::<f32, f32>(
-                    data,
-                    sample_rate,
-                    channels,
-                    vad_handle.clone(),
-                    is_speech.clone(),
-                    speech_dur.clone(),
-                    silence_dur.clone(),
-                )
-            },
-            err_fn,
-            None,
+            sample_rate,
+            channels,
+            vad_handle.clone(),
         )?,
         sample_format => {
             bail!("Unsupported sample format '{sample_format}'")
@@ -130,47 +119,8 @@ fn main() -> Result<()> {
     }
 }
 
-pub fn audio_resample(
-    data: &[f32],
-    sample_rate0: u32,
-    sample_rate: u32,
-    channels: u16,
-) -> Vec<f32> {
-    use samplerate::{convert, ConverterType};
-    convert(
-        sample_rate0 as _,
-        sample_rate as _,
-        channels as _,
-        ConverterType::SincBestQuality,
-        data,
-    )
-    .unwrap_or_default()
-}
-
-pub fn stereo_to_mono(stereo_data: &[f32]) -> Result<Vec<f32>> {
-    if stereo_data.len() % 2 != 0 {
-        bail!("Stereo data length should be even.")
-    }
-
-    let mut mono_data = Vec::with_capacity(stereo_data.len() / 2);
-
-    for chunk in stereo_data.chunks_exact(2) {
-        let average = (chunk[0] + chunk[1]) / 2.0;
-        mono_data.push(average);
-    }
-
-    Ok(mono_data)
-}
-
-fn on_stream_data<T, U>(
-    input: &[T],
-    sample_rate: u32,
-    channels: u16,
-    vad_handle: Arc<Mutex<Vad>>,
-    is_speech: Arc<AtomicBool>,
-    speech_dur: Arc<AtomicUsize>,
-    silence_dur: Arc<AtomicUsize>,
-) where
+fn on_stream_data<T, U>(input: &[T], sample_rate: u32, channels: u16, vad_handle: Arc<Mutex<Vad>>)
+where
     T: Sample,
     U: Sample,
 {
@@ -181,10 +131,10 @@ fn on_stream_data<T, U>(
         .collect();
 
     // Resample the stereo audio to the desired sample rate
-    let mut resampled: Vec<f32> = audio_resample(&samples, sample_rate, 16000, channels);
+    let mut resampled: Vec<f32> = vad_rs::audio_resample(&samples, sample_rate, 16000, channels);
 
     if channels > 1 {
-        resampled = stereo_to_mono(&resampled).unwrap();
+        resampled = vad_rs::stereo_to_mono(&resampled).unwrap();
     }
 
     let chunk_size = (30 * sample_rate / 1000) as usize;
@@ -214,24 +164,25 @@ fn on_stream_data<T, U>(
 
             match result.status() {
                 VadStatus::Speech => {
-                    speech_dur.fetch_add(chunk_size, Ordering::Relaxed);
-                    if speech_dur.load(Ordering::Relaxed) >= *MIN_SPEECH_DUR
-                        && !is_speech.load(Ordering::Relaxed)
+                    SPEECH_DUR.fetch_add(chunk_size, Ordering::Relaxed);
+                    if SPEECH_DUR.load(Ordering::Relaxed) >= *MIN_SPEECH_DUR
+                        && !IS_SPEECH.load(Ordering::Relaxed)
                     {
                         println!("Speech Start");
-                        silence_dur.store(0, Ordering::Relaxed);
-                        is_speech.store(true, Ordering::Relaxed);
+                        SILENCE_DUR.store(0, Ordering::Relaxed);
+                        IS_SPEECH.store(true, Ordering::Relaxed);
                         vad_buf.extend(resampled.clone());
                     }
                 }
                 VadStatus::Silence => {
-                    silence_dur.fetch_add(chunk_size, Ordering::Relaxed);
-                    if silence_dur.load(Ordering::Relaxed) >= *MIN_SILENCE_DUR
-                        && is_speech.load(Ordering::Relaxed)
+                    SILENCE_DUR.fetch_add(chunk_size, Ordering::Relaxed);
+                    if SILENCE_DUR.load(Ordering::Relaxed) >= *MIN_SILENCE_DUR
+                        && IS_SPEECH.load(Ordering::Relaxed)
                     {
                         println!("Speech End");
-                        speech_dur.store(0, Ordering::Relaxed);
-                        is_speech.store(false, Ordering::Relaxed);
+
+                        SPEECH_DUR.store(0, Ordering::Relaxed);
+                        IS_SPEECH.store(false, Ordering::Relaxed);
                     }
                 }
                 _ => {}
