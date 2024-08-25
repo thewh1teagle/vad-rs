@@ -6,6 +6,7 @@ cargo run silero_vad.onnx ggml-small.bin
 Note: In Windows install Vulkan SDK from https://vulkan.lunarg.com and set VULKAN_SDK = "C:\VulkanSDK\<version>"
 Note: In Linux install Vulkan SDK from https://vulkan.lunarg.com and also 'mesa-vulkan-drivers libvulkan1' packages
 
+Todo: the transcription missing the 1s of the start of the speech.
 Todo: Apply loudness normalization to ensure consistent and sufficiently loud audio, possibly using ebur128.
 */
 
