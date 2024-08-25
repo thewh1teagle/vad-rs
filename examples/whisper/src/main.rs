@@ -166,6 +166,7 @@ fn transcribe_in_background() {
         params.set_print_realtime(false);
         params.set_print_special(false);
         params.set_print_timestamps(false);
+        params.set_language(Some("en"));
 
         state.full(params, &samples).unwrap();
         let text = state.full_get_segment_text_lossy(0).unwrap();
