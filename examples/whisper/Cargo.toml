@@ -4,14 +4,22 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-# whisper-rs = { git = "https://github.com/thewh1teagle/whisper-rs.git", branch = "v1.6.3-beta.0", features = [
-#     "whisper-cpp-tracing",
-# ] }
-whisper-rs = { path = "../../../whisper-rs", features = [
-    "whisper-cpp-tracing",
-] }
+
 vad-rs = { path = "../../" }
 cpal = "0.15.3"
 samplerate = "0.2.4"
 eyre = "0.6.12"
 once_cell = "1.19.0"
+
+
+[target.'cfg(target_os = "macos")'.dependencies]
+whisper-rs = { git = "https://github.com/thewh1teagle/whisper-rs.git", branch = "v1.6.3-beta.0", features = [
+    "whisper-cpp-tracing",
+    "coreml",
+] }
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+whisper-rs = { git = "https://github.com/thewh1teagle/whisper-rs.git", branch = "v1.6.3-beta.0", features = [
+    "whisper-cpp-tracing",
+    "vulkan",
+] }

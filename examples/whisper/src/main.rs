@@ -2,6 +2,8 @@
 wget https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx
 wget https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin
 cargo run silero_vad.onnx ggml-tiny.bin
+
+Note: In Windows install Vulkan SDK from https://vulkan.lunarg.com and set VULKAN_SDK = "C:\VulkanSDK\<version>"
 */
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -170,7 +172,7 @@ pub fn audio_resample(
 }
 
 pub fn stereo_to_mono(stereo_data: &[f32]) -> Result<Vec<f32>> {
-    if stereo_data.len() & 2 != 0 {
+    if stereo_data.len() % 2 != 0 {
         bail!("Stereo data length should be even.")
     }
 
@@ -230,7 +232,11 @@ fn on_stream_data<T, U>(
         .collect();
 
     // Resample the stereo audio to the desired sample rate
-    let resampled: Vec<f32> = audio_resample(&samples, sample_rate, 16000, channels);
+    let mut resampled: Vec<f32> = audio_resample(&samples, sample_rate, 16000, channels);
+
+    if channels > 1 {
+        resampled = stereo_to_mono(&resampled).unwrap();
+    }
 
     let chunk_size = (30 * sample_rate / 1000) as usize;
     let mut vad = vad_handle.lock().unwrap();
