@@ -3,6 +3,7 @@ wget https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_v
 cargo run --example record silero_vad.onnx
 
 Todo: Apply loudness normalization to ensure consistent and sufficiently loud audio, possibly using ebur128.
+Todo: Use ringbuffer instead or array.
 */
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
