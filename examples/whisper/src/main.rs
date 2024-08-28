@@ -14,6 +14,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::Sample;
 use eyre::{bail, Result};
 use once_cell::sync::Lazy;
+use ringbuffer::{AllocRingBuffer, RingBuffer};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -30,7 +31,8 @@ static MIN_SILENCE_DUR: Lazy<usize> = Lazy::new(|| 500); // 1s
 static VAD_BUF: Lazy<Mutex<Vec<f32>>> = Lazy::new(|| Mutex::new(Vec::new()));
 
 // Whisper
-static SPEECH_BUF: Lazy<Mutex<Vec<f32>>> = Lazy::new(|| Mutex::new(Vec::new()));
+static SPEECH_BUF: Lazy<Mutex<AllocRingBuffer<f32>>> =
+    Lazy::new(|| Mutex::new(AllocRingBuffer::new(16000 * 30)));
 static WHISPER_STATE: Lazy<Arc<Mutex<Option<WhisperState>>>> =
     Lazy::new(|| Arc::new(Mutex::new(None)));
 static WHISPER_PARAMS: Lazy<Mutex<Option<FullParams>>> = Lazy::new(|| Mutex::new(None));
@@ -169,7 +171,7 @@ fn transcribe_in_background() {
         params.set_print_timestamps(false);
         params.set_language(Some("en"));
 
-        state.full(params, &samples).unwrap();
+        state.full(params, &samples.to_vec()).unwrap();
         let text = state.full_get_segment_text_lossy(0).unwrap();
         println!("Text: {}", text);
         samples.clear();
