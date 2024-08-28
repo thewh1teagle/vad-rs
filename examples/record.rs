@@ -14,8 +14,8 @@ use std::time::Instant;
 use vad_rs::{Normalizer, Vad, VadStatus};
 
 // Options
-static MIN_SPEECH_DUR: Lazy<usize> = Lazy::new(|| 200); // 0.6s
-static MIN_SILENCE_DUR: Lazy<usize> = Lazy::new(|| 500); // 1s
+static MIN_SPEECH_DUR: Lazy<usize> = Lazy::new(|| 700); // 0.6s
+static MIN_SILENCE_DUR: Lazy<usize> = Lazy::new(|| 700);
 
 // Vad
 static VAD_BUF: Lazy<Mutex<AllocRingBuffer<f32>>> =
@@ -80,7 +80,7 @@ fn main() -> Result<()> {
 
     // Loudness normalization
 
-    let normalizer = Normalizer::new();
+    let normalizer = Normalizer::new(config.channels().into(), config.sample_rate().0);
     *NORMALIZER.lock().unwrap() = Some(normalizer);
 
     let stream = match config.sample_format() {
