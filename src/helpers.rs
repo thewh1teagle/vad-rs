@@ -38,8 +38,8 @@ pub struct Normalizer {
 }
 
 impl Normalizer {
-    pub fn new() -> Self {
-        let ebur128 = ebur128::EbuR128::new(1, 16000, ebur128::Mode::all())
+    pub fn new(channels: u32, sample_rate: u32) -> Self {
+        let ebur128 = ebur128::EbuR128::new(channels, sample_rate, ebur128::Mode::all())
             .expect("Failed to create ebur128");
         Self { ebur128 }
     }
