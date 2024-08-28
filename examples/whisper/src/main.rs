@@ -24,15 +24,18 @@ use whisper_rs::{
 };
 
 // Options
-static MIN_SPEECH_DUR: Lazy<usize> = Lazy::new(|| 50); // 0.6s
-static MIN_SILENCE_DUR: Lazy<usize> = Lazy::new(|| 500); // 1s
+static MIN_SPEECH_DUR: Lazy<usize> = Lazy::new(|| 500); // 0.5s
+static MIN_SILENCE_DUR: Lazy<usize> = Lazy::new(|| 1500); // 1.5s
 
 // Vad
-static VAD_BUF: Lazy<Mutex<Vec<f32>>> = Lazy::new(|| Mutex::new(Vec::new()));
+static VAD_BUF: Lazy<Mutex<AllocRingBuffer<f32>>> =
+    Lazy::new(|| Mutex::new(AllocRingBuffer::new(16000 * 1))); // 1s
+static PRE_SPEECH_BUF: Lazy<Mutex<AllocRingBuffer<f32>>> =
+    Lazy::new(|| Mutex::new(AllocRingBuffer::new(16000 * 2))); // 2s
 
 // Whisper
 static SPEECH_BUF: Lazy<Mutex<AllocRingBuffer<f32>>> =
-    Lazy::new(|| Mutex::new(AllocRingBuffer::new(16000 * 30)));
+    Lazy::new(|| Mutex::new(AllocRingBuffer::new(16000 * 30))); // 30s
 static WHISPER_STATE: Lazy<Arc<Mutex<Option<WhisperState>>>> =
     Lazy::new(|| Arc::new(Mutex::new(None)));
 static WHISPER_PARAMS: Lazy<Mutex<Option<FullParams>>> = Lazy::new(|| Mutex::new(None));
@@ -152,7 +155,8 @@ fn main() -> Result<()> {
 
 fn transcribe_in_background() {
     std::thread::spawn(|| {
-        let mut samples = SPEECH_BUF.lock().unwrap();
+        let mut speech_buf = SPEECH_BUF.lock().unwrap();
+        let samples = speech_buf.to_vec();
 
         let min_samples = (1.0 * 16_000.0) as usize;
         if samples.len() < min_samples {
@@ -171,10 +175,10 @@ fn transcribe_in_background() {
         params.set_print_timestamps(false);
         params.set_language(Some("en"));
 
-        state.full(params, &samples.to_vec()).unwrap();
+        state.full(params, &samples).unwrap();
         let text = state.full_get_segment_text_lossy(0).unwrap();
         println!("Text: {}", text);
-        samples.clear();
+        speech_buf.clear();
     });
 }
 
@@ -200,19 +204,24 @@ where
     let mut vad = vad_handle.lock().unwrap();
 
     let mut vad_buf = VAD_BUF.lock().unwrap();
+    let mut pre_speech_buf = PRE_SPEECH_BUF.lock().unwrap();
     vad_buf.extend(resampled.clone());
 
+    // Store pre speech samples (2s)
+    pre_speech_buf.extend(resampled.clone());
+    // push speech samples to speech buf
     if IS_SPEECH.load(Ordering::Relaxed) {
         SPEECH_BUF.lock().unwrap().extend(resampled.clone());
     }
 
+    // 1s audio in vad buffer
     if vad_buf.len() as f32 > sample_rate as f32 * 0.1 {
         // 0.1s
         // Start timing
         let start_time = Instant::now();
 
         // println!("compute {:?}", vad_buf.len());
-        if let Ok(mut result) = vad.compute(&vad_buf) {
+        if let Ok(mut result) = vad.compute(&vad_buf.to_vec()) {
             // Calculate the elapsed time
             let elapsed_time = start_time.elapsed();
             let elapsed_ms = elapsed_time.as_secs_f64() * 1000.0;
@@ -234,7 +243,9 @@ where
                         println!("Speech Start");
                         SILENCE_DUR.store(0, Ordering::Relaxed);
                         IS_SPEECH.store(true, Ordering::Relaxed);
-                        vad_buf.extend(resampled.clone());
+                        let mut speech_buf = SPEECH_BUF.lock().unwrap();
+                        speech_buf.extend(pre_speech_buf.to_vec());
+                        speech_buf.extend(resampled.clone());
                     }
                 }
                 VadStatus::Silence => {
@@ -243,6 +254,7 @@ where
                         && IS_SPEECH.load(Ordering::Relaxed)
                     {
                         println!("Speech End");
+
                         transcribe_in_background();
 
                         SPEECH_DUR.store(0, Ordering::Relaxed);
