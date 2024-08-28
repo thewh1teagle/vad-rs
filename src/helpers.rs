@@ -1,3 +1,4 @@
+use ebur128::EbuR128;
 use eyre::{bail, Result};
 
 pub fn audio_resample(
@@ -30,4 +31,36 @@ pub fn stereo_to_mono(stereo_data: &[f32]) -> Result<Vec<f32>> {
     }
 
     Ok(mono_data)
+}
+
+pub struct Normalizer {
+    ebur128: EbuR128,
+}
+
+impl Normalizer {
+    pub fn new() -> Self {
+        let ebur128 = ebur128::EbuR128::new(1, 16000, ebur128::Mode::all())
+            .expect("Failed to create ebur128");
+        Self { ebur128 }
+    }
+
+    /// Normalize loudness using ebur128. making the volume stable if too quiet / loud.
+    pub fn normalize_loudness(&mut self, samples: &[f32]) -> Vec<f32> {
+        // Apply loudness normalization
+        self.ebur128.add_frames_f32(samples).unwrap();
+        let loudness = self
+            .ebur128
+            .loudness_global()
+            .expect("Failed to get global loudness");
+        let target_loudness = -23.0; // EBU R128 target loudness
+        let gain = 10f32.powf(((target_loudness - loudness) / 20.0) as f32);
+
+        // Apply gain and clamp the result
+        let normalized_samples: Vec<f32> = samples
+            .iter()
+            .map(|&sample| (sample * gain).clamp(-1.0, 1.0))
+            .collect();
+
+        normalized_samples
+    }
 }

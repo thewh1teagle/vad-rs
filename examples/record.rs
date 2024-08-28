@@ -1,31 +1,31 @@
 /*
 wget https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx
 cargo run --example record silero_vad.onnx
-
-Todo: Apply loudness normalization to ensure consistent and sufficiently loud audio, possibly using ebur128.
-Todo: Use ringbuffer instead or array.
 */
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::Sample;
 use eyre::{bail, Result};
 use once_cell::sync::Lazy;
+use ringbuffer::{AllocRingBuffer, RingBuffer};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use vad_rs::{Vad, VadStatus};
+use vad_rs::{Normalizer, Vad, VadStatus};
 
 // Options
-static MIN_SPEECH_DUR: Lazy<usize> = Lazy::new(|| 50); // 0.6s
+static MIN_SPEECH_DUR: Lazy<usize> = Lazy::new(|| 200); // 0.6s
 static MIN_SILENCE_DUR: Lazy<usize> = Lazy::new(|| 500); // 1s
 
 // Vad
-static VAD_BUF: Lazy<Mutex<Vec<f32>>> = Lazy::new(|| Mutex::new(Vec::new()));
+static VAD_BUF: Lazy<Mutex<AllocRingBuffer<f32>>> =
+    Lazy::new(|| Mutex::new(AllocRingBuffer::new(16000 * 1)));
 
 // State
 static IS_SPEECH: Lazy<Arc<AtomicBool>> = Lazy::new(|| Arc::new(AtomicBool::new(false)));
 static SPEECH_DUR: Lazy<Arc<AtomicUsize>> = Lazy::new(|| Arc::new(AtomicUsize::new(0)));
 static SILENCE_DUR: Lazy<Arc<AtomicUsize>> = Lazy::new(|| Arc::new(AtomicUsize::new(0)));
+static NORMALIZER: Lazy<Arc<Mutex<Option<Normalizer>>>> = Lazy::new(|| Arc::new(None.into()));
 
 fn build_stream<T>(
     device: &cpal::Device,
@@ -77,6 +77,11 @@ fn main() -> Result<()> {
 
     let sample_rate = config.sample_rate().0;
     let channels = config.channels();
+
+    // Loudness normalization
+
+    let normalizer = Normalizer::new();
+    *NORMALIZER.lock().unwrap() = Some(normalizer);
 
     let stream = match config.sample_format() {
         cpal::SampleFormat::I8 => build_stream::<i8>(
@@ -134,9 +139,14 @@ where
     // Resample the stereo audio to the desired sample rate
     let mut resampled: Vec<f32> = vad_rs::audio_resample(&samples, sample_rate, 16000, channels);
 
+    #[allow(unused)]
     if channels > 1 {
         resampled = vad_rs::stereo_to_mono(&resampled).unwrap();
     }
+
+    let mut normalizer = NORMALIZER.lock().unwrap();
+    let normalizer = normalizer.as_mut().unwrap();
+    resampled = normalizer.normalize_loudness(&samples);
 
     let chunk_size = (30 * sample_rate / 1000) as usize;
     let mut vad = vad_handle.lock().unwrap();
@@ -150,7 +160,7 @@ where
         let start_time = Instant::now();
 
         // println!("compute {:?}", vad_buf.len());
-        if let Ok(mut result) = vad.compute(&vad_buf) {
+        if let Ok(mut result) = vad.compute(&vad_buf.to_vec()) {
             // Calculate the elapsed time
             let elapsed_time = start_time.elapsed();
             let elapsed_ms = elapsed_time.as_secs_f64() * 1000.0;
