@@ -1,5 +1,5 @@
 /*
-wget https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx
+wget https://github.com/thewh1teagle/vad-rs/releases/download/v0.1.0/silero_vad.onnx
 wget https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
 cargo run silero_vad.onnx ggml-small.bin
 

@@ -1,3 +1,9 @@
+/*
+wget https://github.com/thewh1teagle/vad-rs/releases/download/v0.1.0/silero_vad.onnx
+wget https://github.com/thewh1teagle/vad-rs/releases/download/v0.1.0/motivation.wav
+cargo run --example segment silero_vad.onnx motivation.wav
+*/
+
 use hound::WavReader;
 use vad_rs::{Vad, VadStatus};
 

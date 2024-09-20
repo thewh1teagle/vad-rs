@@ -1,5 +1,6 @@
 /*
-wget https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx
+wget https://github.com/thewh1teagle/vad-rs/releases/download/v0.1.0/silero_vad.onnx
+wget https://github.com/thewh1teagle/vad-rs/releases/download/v0.1.0/motivation.wav
 cargo run --example record silero_vad.onnx
 */
 
