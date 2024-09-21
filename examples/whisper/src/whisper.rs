@@ -11,11 +11,8 @@ static WHISPER_PARAMS: Lazy<Mutex<Option<FullParams>>> = Lazy::new(|| Mutex::new
 
 pub fn init(model_path: &str) {
     // Whisper
-    let ctx = WhisperContext::new_with_params(
-        &model_path.to_string(),
-        WhisperContextParameters::default(),
-    )
-    .unwrap();
+    let ctx =
+        WhisperContext::new_with_params(model_path, WhisperContextParameters::default()).unwrap();
     let state = ctx.create_state().expect("failed to create key");
     whisper_rs::install_whisper_tracing_trampoline();
     let mut params = FullParams::new(SamplingStrategy::default());
@@ -48,7 +45,7 @@ pub fn transcribe(samples: &[f32]) -> Option<String> {
     params.set_print_timestamps(false);
     params.set_language(Some("en"));
 
-    state.full(params, &samples).unwrap();
+    state.full(params, samples).unwrap();
     let text = state.full_get_segment_text_lossy(0).unwrap();
-    return Some(text);
+    Some(text)
 }
