@@ -19,7 +19,7 @@ static MIN_SILENCE_DUR: Lazy<usize> = Lazy::new(|| 700);
 
 // Vad
 static VAD_BUF: Lazy<Mutex<AllocRingBuffer<f32>>> =
-    Lazy::new(|| Mutex::new(AllocRingBuffer::new(16000 * 1)));
+    Lazy::new(|| Mutex::new(AllocRingBuffer::new(16000)));
 
 // State
 static IS_SPEECH: Lazy<Arc<AtomicBool>> = Lazy::new(|| Arc::new(AtomicBool::new(false)));
@@ -43,7 +43,7 @@ where
     Ok(device.build_input_stream(
         config,
         move |data: &[T], _: &_| {
-            on_stream_data::<T, T>(data, sample_rate, channels, vad_handle.clone());
+            on_stream_data::<T>(data, sample_rate, channels, vad_handle.clone());
         },
         err_fn,
         None,
@@ -125,10 +125,9 @@ fn main() -> Result<()> {
     }
 }
 
-fn on_stream_data<T, U>(input: &[T], sample_rate: u32, channels: u16, vad_handle: Arc<Mutex<Vad>>)
+fn on_stream_data<T>(input: &[T], sample_rate: u32, channels: u16, vad_handle: Arc<Mutex<Vad>>)
 where
     T: Sample,
-    U: Sample,
 {
     // Convert the input samples to f32
     let samples: Vec<f32> = input

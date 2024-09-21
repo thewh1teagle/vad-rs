@@ -15,7 +15,7 @@ fn main() {
         .nth(2)
         .expect("Please specify audio filename");
 
-    let mut reader = WavReader::open(&audio_path).unwrap();
+    let mut reader = WavReader::open(audio_path).unwrap();
     let spec = reader.spec();
     let mut vad = Vad::new(model_path, spec.sample_rate.try_into().unwrap()).unwrap();
 
