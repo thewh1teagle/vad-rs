@@ -5,8 +5,6 @@ cargo run silero_vad.onnx ggml-small.bin
 
 Note: In Windows install Vulkan SDK from https://vulkan.lunarg.com and set VULKAN_SDK = "C:\VulkanSDK\<version>"
 Note: In Linux install Vulkan SDK from https://vulkan.lunarg.com and also 'mesa-vulkan-drivers libvulkan1' packages
-
-Todo: Apply loudness normalization from helpers. Currently it cause segfault.
 */
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -17,27 +15,23 @@ use ringbuffer::{AllocRingBuffer, RingBuffer};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use vad_rs::{Vad, VadStatus};
-use whisper_rs::{
-    FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperState,
-};
+use vad_rs::{Normalizer, Vad, VadStatus};
+mod whisper;
 
 // Options
-static MIN_SPEECH_DUR: Lazy<usize> = Lazy::new(|| 500); // 0.5s
-static MIN_SILENCE_DUR: Lazy<usize> = Lazy::new(|| 1500); // 1.5s
+static MIN_SPEECH_DUR: Lazy<usize> = Lazy::new(|| 700); // 0.6s
+static MIN_SILENCE_DUR: Lazy<usize> = Lazy::new(|| 1500);
 
 // Vad
 static VAD_BUF: Lazy<Mutex<AllocRingBuffer<f32>>> =
     Lazy::new(|| Mutex::new(AllocRingBuffer::new(16000 * 1))); // 1s
 static PRE_SPEECH_BUF: Lazy<Mutex<AllocRingBuffer<f32>>> =
     Lazy::new(|| Mutex::new(AllocRingBuffer::new(16000 * 2))); // 2s
+static NORMALIZER: Lazy<Arc<Mutex<Option<Normalizer>>>> = Lazy::new(|| Arc::new(None.into()));
 
 // Whisper
 static SPEECH_BUF: Lazy<Mutex<AllocRingBuffer<f32>>> =
     Lazy::new(|| Mutex::new(AllocRingBuffer::new(16000 * 30))); // 30s
-static WHISPER_STATE: Lazy<Arc<Mutex<Option<WhisperState>>>> =
-    Lazy::new(|| Arc::new(Mutex::new(None)));
-static WHISPER_PARAMS: Lazy<Mutex<Option<FullParams>>> = Lazy::new(|| Mutex::new(None));
 
 // State
 static IS_SPEECH: Lazy<Arc<AtomicBool>> = Lazy::new(|| Arc::new(AtomicBool::new(false)));
@@ -78,6 +72,9 @@ fn main() -> Result<()> {
     let vad = Vad::new(vad_model_path, 16000).unwrap();
     let vad_handle = Arc::new(Mutex::new(vad));
 
+    let normalizer = Normalizer::new(1, 16000);
+    *NORMALIZER.lock().unwrap() = Some(normalizer);
+
     let host = cpal::default_host();
 
     // Set up the input device and stream with the default input config.
@@ -99,16 +96,7 @@ fn main() -> Result<()> {
     let channels = config.channels();
 
     // Whisper
-    let ctx = WhisperContext::new_with_params(
-        &&whisper_model_path.to_string(),
-        WhisperContextParameters::default(),
-    )
-    .unwrap();
-    let state = ctx.create_state().expect("failed to create key");
-    whisper_rs::install_whisper_tracing_trampoline();
-    let params = FullParams::new(SamplingStrategy::default());
-    *WHISPER_STATE.lock().unwrap() = Some(state);
-    *WHISPER_PARAMS.lock().unwrap() = Some(params);
+    whisper::init(&whisper_model_path);
 
     let stream = match config.sample_format() {
         cpal::SampleFormat::I8 => build_stream::<i8>(
@@ -162,21 +150,10 @@ fn transcribe_in_background() {
             println!("Less than 1s. Skipping...");
             return;
         }
-        let state = WHISPER_STATE.clone();
-        let mut state = state.lock().unwrap();
-        let state = state.as_mut().unwrap();
-        let params = WHISPER_PARAMS.lock().unwrap();
-        let mut params = params.clone().unwrap();
 
-        params.set_print_progress(false);
-        params.set_print_realtime(false);
-        params.set_print_special(false);
-        params.set_print_timestamps(false);
-        params.set_language(Some("en"));
-
-        state.full(params, &samples).unwrap();
-        let text = state.full_get_segment_text_lossy(0).unwrap();
-        println!("Text: {}", text);
+        if let Some(text) = whisper::transcribe(&samples) {
+            println!("text: {}", text);
+        }
         speech_buf.clear();
     });
 }
@@ -198,6 +175,10 @@ where
     if channels > 1 {
         resampled = vad_rs::stereo_to_mono(&resampled).unwrap();
     }
+    // Normalize loudness
+    let mut normalizer = NORMALIZER.lock().unwrap();
+    let normalizer = normalizer.as_mut().unwrap();
+    let resampled = normalizer.normalize_loudness(&resampled);
 
     let chunk_size = (30 * sample_rate / 1000) as usize;
     let mut vad = vad_handle.lock().unwrap();
