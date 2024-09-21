@@ -3,7 +3,7 @@ members = ["examples/whisper"]
 
 [package]
 name = "vad-rs"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 description = "Speech detection using silero vad in Rust"
 license = "MIT"
