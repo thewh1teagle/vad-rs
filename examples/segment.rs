@@ -31,11 +31,11 @@ fn main() {
     let mut silence_duration = 0.0;
     let sample_rate = spec.sample_rate as f32;
 
-    // Add 1s of silence to the end of the samples
-    samples.extend(vec![0.0; sample_rate as usize]);
-
     let min_speech_dur = 0.3; // Minimum speech duration in seconds
     let min_silence_dur = 0.5; // Minimum silence duration in seconds
+
+    // Add 1s of silence to the end of the samples
+    samples.extend(vec![0.0; sample_rate as usize]);
 
     for (i, chunk) in samples.chunks(chunk_size).enumerate() {
         let time = i as f32 * chunk_size as f32 / sample_rate;
