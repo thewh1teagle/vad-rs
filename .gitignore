@@ -2,3 +2,7 @@ target/
 *.onnx
 *.wav
 *.bin
+
+# allow test fixtures
+!tests/fixtures/*.onnx
+!tests/fixtures/*.wav

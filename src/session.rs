@@ -5,9 +5,9 @@ use ort::session::{builder::GraphOptimizationLevel, Session};
 
 pub fn create_session<P: AsRef<Path>>(path: P) -> Result<Session> {
     let session = Session::builder()?
-        .with_optimization_level(GraphOptimizationLevel::Level3)?
-        .with_intra_threads(1)?
-        .with_inter_threads(1)?
-        .commit_from_file(path.as_ref())?;
+        .with_optimization_level(GraphOptimizationLevel::Level3).map_err(|e| -> ort::Error { e.into() })?
+        .with_intra_threads(1).map_err(|e| -> ort::Error { e.into() })?
+        .with_inter_threads(1).map_err(|e| -> ort::Error { e.into() })?
+        .commit_from_file(path.as_ref()).map_err(|e| -> ort::Error { e.into() })?;
     Ok(session)
 }
